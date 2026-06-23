@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>4-Stroke Engine Animation</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #1a1a2e;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+.container {
+  text-align: center;
+}
+canvas {
+  background: #16213e;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  display: block;
+  max-width: 100vw;
+  max-height: 100vh;
+}
+.stroke-label {
+  color: #e0e0e0;
+  font-size: 1.4rem;
+  margin-top: 16px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+.info {
+  display: flex;
+  justify-content: center;
+  gap: 32px;
+  margin-top: 10px;
+  color: #a0aec0;
+  font-size: 0.9rem;
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <canvas id="engine" width="600" height="600"></canvas>
+  <div class="stroke-label" id="strokeLabel">INTAKE</div>
+  <div class="info">
+    <span>⏱ <span id="rpm">60</span> RPM</span>
+    <span>🔄 <span id="angle">0</span>°</span>
+  </div>
+</div>
+<script>
+const canvas = document.getElementById('engine');
+const ctx = canvas.getContext('2d');
+const strokeLabel = document.getElementById('strokeLabel');
+const rpmEl = document.getElementById('rpm');
+const angleEl = document.getElementById('angle');
+
+const W = canvas.width;
+const H = canvas.height;
+
+// Engine geometry (in canvas pixels)
+const crankCenter = { x: W/2, y: 400 };
+const crankRadius = 60;
+const rodLength = 180;
+const cylinderTop = 80;
+const cylinderBottom = 360;   // where piston bottom reaches BDC
+const pistonHeight = 50;
+const pistonWidth = 100;
+const cylinderWidth = 120;
+
+// Animation state
+let theta = 0;                   // crank angle in radians
+const rpm = 60;                  // revolutions per minute
+const radPerFrame = (2 * Math.PI * rpm) / (60 * 60); // assuming 60fps
+
+function getPistonY(theta) {
+  // theta = 0 at TDC, crank pin directly above center
+  const sinT = Math.sin(theta);
+  const cosT = Math.cos(theta);
+  const crankY = crankCenter.y - crankRadius * cosT;
+  const discriminant = rodLength * rodLength - (crankRadius * sinT) * (crankRadius * sinT);
+  if (discriminant < 0) return crankY - rodLength; // fallback
+  const pistonY = crankY - Math.sqrt(discriminant);
+  return pistonY;
+}
+
+function getStroke(theta) {
+  // Normalise theta to [0, 4π) over two rotations
+  let t = ((theta % (4*Math.PI)) + 4*Math.PI) % (4*Math.PI);
+  if (t < Math.PI) return 'intake';
+  if (t < 2*Math.PI) return 'compression';
+  if (t < 3*Math.PI) return 'power';
+  return 'exhaust';
+}
+
+function getStrokePhase(theta) {
+  // returns a value 0..1 within current stroke
+  let t = ((theta % (4*Math.PI)) + 4*Math.PI) % (4*Math.PI);
+  const stroke = Math.floor(t / Math.PI);
+  const phase = (t - stroke * Math.PI) / Math.PI;
+  return { stroke, phase };
+}
+
+function getCylinderFillColor(stroke, phase) {
+  switch (stroke) {
+    case 0: // intake – blue gradient filling as piston descends
+      return `rgba(66, 133, 244, ${0.3 + phase * 0.7})`;
+    case 1: // compression – blue, intensify
+      return `rgba(20, 80, 200, ${0.6 + phase * 0.4})`;
+    case 2: // power – yellow/orange, brightest at start
+      return `rgba(255, ${200 - Math.floor(phase * 150)}, 0, ${1 - phase * 0.7})`;
+    case 3: // exhaust – grey, fading
+      return `rgba(160, 160, 160, ${0.5 + phase * 0.5})`;
+    default:
+      return 'transparent';
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  const pistonY = getPistonY(theta);
+  const pistonTop = pistonY - pistonHeight/2;
+  const pistonBottom = pistonY + pistonHeight/2;
+  const { stroke, phase } = getStrokePhase(theta);
+  const strokeName = ['INTAKE', 'COMPRESSION', 'POWER', 'EXHAUST'][stroke];
+  strokeLabel.textContent = strokeName;
+
+  // Cylinder block (walls and head)
+  ctx.strokeStyle = '#8899aa';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(crankCenter.x - cylinderWidth/2, cylinderTop);
+  ctx.lineTo(crankCenter.x - cylinderWidth/2, cylinderBottom);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(crankCenter.x + cylinderWidth/2, cylinderTop);
+  ctx.lineTo(crankCenter.x + cylinderWidth/2, cylinderBottom);
+  ctx.stroke();
+  // Cylinder head (top)
+  ctx.beginPath();
+  ctx.moveTo(crankCenter.x - cylinderWidth/2 - 10, cylinderTop);
+  ctx.lineTo(crankCenter.x + cylinderWidth/2 + 10, cylinderTop);
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = '#667788';
+  ctx.stroke();
+
+  // Fill cylinder above piston with stroke color
+  const fillColor = getCylinderFillColor(stroke, phase);
+  ctx.fillStyle = fillColor;
+  ctx.fillRect(crankCenter.x - cylinderWidth/2 + 4, cylinderTop + 4,
+               cylinderWidth - 8, pistonTop - cylinderTop - 4);
+
+  // Piston
+  ctx.fillStyle = '#c0c8d0';
+  ctx.strokeStyle = '#2a3038';
+  ctx.lineWidth = 2;
+  ctx.fillRect(crankCenter.x - pistonWidth/2, pistonTop, pistonWidth, pistonHeight);
+  ctx.strokeRect(crankCenter.x - pistonWidth/2, pistonTop, pistonWidth, pistonHeight);
+  // Piston rings (two thin lines)
+  ctx.strokeStyle = '#5a6068';
+  ctx.lineWidth = 1.5;
+  for (let i = 8; i <= 20; i += 8) {
+    ctx.beginPath();
+    ctx.moveTo(crankCenter.x - pistonWidth/2 + 6, pistonTop + i);
+    ctx.lineTo(crankCenter.x + pistonWidth/2 - 6, pistonTop + i);
+    ctx.stroke();
+  }
+
+  // Wrist pin (piston pin)
+  const wristPinX = crankCenter.x;
+  const wristPinY = pistonY;
+  ctx.beginPath();
+  ctx.arc(wristPinX, wristPinY, 5, 0, 2*Math.PI);
+  ctx.fillStyle = '#aaa';
+  ctx.fill();
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Crank pin position
+  const sinT = Math.sin(theta);
+  const cosT = Math.cos(theta);
+  const crankPinX = crankCenter.x + crankRadius * sinT;
+  const crankPinY = crankCenter.y - crankRadius * cosT;
+
+  // Connecting rod
+  ctx.strokeStyle = '#8a9aa8';
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.moveTo(wristPinX, wristPinY);
+  ctx.lineTo(crankPinX, crankPinY);
+  ctx.stroke();
+  // Thin highlight line
+  ctx.strokeStyle = '#b0c0d0';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(wristPinX, wristPinY);
+  ctx.lineTo(crankPinX, crankPinY);
+  ctx.stroke();
+
+  // Crankshaft disc
+  ctx.beginPath();
+  ctx.arc(crankCenter.x, crankCenter.y, crankRadius + 12, 0, 2*Math.PI);
+  ctx.fillStyle = '#3a4a58';
+  ctx.fill();
+  ctx.strokeStyle = '#2a3038';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Crank pin (on disc)
+  ctx.beginPath();
+  ctx.arc(crankPinX, crankPinY, 7, 0, 2*Math.PI);
+  ctx.fillStyle = '#c0c8d0';
+  ctx.fill();
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Crank radius line (center to pin)
+  ctx.strokeStyle = '#607080';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(crankCenter.x, crankCenter.y);
+  ctx.lineTo(crankPinX, crankPinY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Center dot
+  ctx.beginPath();
+  ctx.arc(crankCenter.x, crankCenter.y, 4, 0, 2*Math.PI);
+  ctx.fillStyle = '#c0c8d0';
+  ctx.fill();
+
+  // Update info
+  const degrees = ((theta * 180 / Math.PI) % 360).toFixed(1);
+  angleEl.textContent = degrees;
+  rpmEl.textContent = rpm;
+
+  // Advance theta
+  theta += radPerFrame;
+  if (theta > 2 * Math.PI * 100) theta -= 2 * Math.PI * 100; // keep within range
+}
+
+// Start animation
+function animate() {
+  draw();
+  requestAnimationFrame(animate);
+}
+animate();
+</script>
+</body>
+</html>
